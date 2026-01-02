@@ -228,28 +228,28 @@ async function connectToWhatsApp(id = "Admin", pairingNumber = null, res = null)
     // 2. CONFIGURATION BAILEYS
     const { state, saveCreds } = await useMultiFileAuthState(folderName);
     const { version } = await fetchLatestBaileysVersion();
+
     const sock = makeWASocket({
         version,
         logger: pino({ level: 'silent' }),
         printQRInTerminal: false,
+        mobile: false, 
         auth: {
             creds: state.creds,
             keys: makeCacheableSignalKeyStore(state.keys, pino({ level: "fatal" })),
         },
-        browser: ["Ubuntu", "Chrome", "20.0.04"], 
+        // 👇 CHANGEMENT ICI : On se fait passer pour un Mac avec Chrome pour éviter le blocage
+        browser: ["Mac OS", "Chrome", "121.0.0"], 
         
-        // 👇 C'EST ICI QUE LA MAGIE OPÈRE POUR RÉGLER TON BUG 👇
-        syncFullHistory: false, // IMPORTANT : Ne pas télécharger les anciens messages (évite le plantage)
-        markOnlineOnConnect: false, // Se mettre en ligne seulement quand tout est prêt
+        // 👇 Options pour internet lent / Render
+        syncFullHistory: false, // Ne pas charger l'historique (évite le timeout)
         generateHighQualityLinkPreview: true,
+        markOnlineOnConnect: false,
+        keepAliveIntervalMs: 10000,
+        connectTimeoutMs: 60000, 
+        retryRequestDelayMs: 2000,
         
-        // Gestion de la connexion lente
-        connectTimeoutMs: 60000, // Attendre jusqu'à 60 secondes
-        defaultQueryTimeoutMs: 0, // Ne jamais abandonner une requête
-        keepAliveIntervalMs: 10000, // Ping WhatsApp toutes les 10 secondes
-        retryRequestDelayMs: 5000, // Attendre 5s avant de réessayer en cas d'échec
-
-        // Petite fonction technique requise par les nouvelles versions de Baileys
+        // Fonction requise par Baileys
         getMessage: async (key) => {
             return { conversation: 'Hello' };
         }
@@ -1581,4 +1581,5 @@ async function textPro(url, text) {
         throw e;
     }
 }
+
 
