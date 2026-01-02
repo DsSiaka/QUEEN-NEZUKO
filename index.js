@@ -46,7 +46,6 @@ const mongoURL = "mongodb+srv://Dssiaka:Keita1234.@queennezuko.gnrhdxk.mongodb.n
 // Modifie la création du client pour être plus robuste
 const mongoClient = new MongoClient(mongoURL, {
     connectTimeoutMS: 30000, // Attendre 30s max
-    keepAlive: true,
     socketTimeoutMS: 45000
 });
 
@@ -1582,3 +1581,4 @@ async function textPro(url, text) {
         throw e;
     }
 }
+
