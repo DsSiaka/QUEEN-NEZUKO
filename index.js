@@ -40,8 +40,15 @@ const dbFile = './database.json';
 const PORT = process.env.PORT || 4000; // Port 4000 pour éviter les conflits
 
 // Configuration MongoDB
-const mongoURL = "mongodb+srv://Dssiaka:Keita1234.@queennezuko.gnrhdxk.mongodb.net/?appName=QueenNezuko";
-const mongoClient = new MongoClient(mongoURL);
+// Remplace ta ligne mongoURL par celle-ci (j'ajoute des options à la fin)
+const mongoURL = "mongodb+srv://Dssiaka:Keita1234.@queennezuko.gnrhdxk.mongodb.net/?retryWrites=true&w=majority&appName=QueenNezuko";
+
+// Modifie la création du client pour être plus robuste
+const mongoClient = new MongoClient(mongoURL, {
+    connectTimeoutMS: 30000, // Attendre 30s max
+    keepAlive: true,
+    socketTimeoutMS: 45000
+});
 
 // Configuration Admin
 let mode = 'public';
@@ -222,7 +229,6 @@ async function connectToWhatsApp(id = "Admin", pairingNumber = null, res = null)
     // 2. CONFIGURATION BAILEYS
     const { state, saveCreds } = await useMultiFileAuthState(folderName);
     const { version } = await fetchLatestBaileysVersion();
-
     const sock = makeWASocket({
         version,
         logger: pino({ level: 'silent' }),
