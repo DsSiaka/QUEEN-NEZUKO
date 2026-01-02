@@ -1,0 +1,68 @@
+{
+  "120363322586616247@g.us": {
+    "antilink_delete": true,
+    "antilink_warn": true,
+    "antilink_kick": false,
+    "antisticker": false,
+    "antimedia": false,
+    "antibad": false,
+    "badwords": [],
+    "users": {
+      "218790449164325@lid": {
+        "warnings": 0
+      },
+      "278301583106153@lid": {
+        "warnings": 3
+      }
+    },
+    "antinsfw": false,
+    "antimention": false,
+    "antitag": false,
+    "antitemu": false,
+    "antispam": true,
+    "welcome": false
+  },
+  "settings": {
+    "autoviewstatus": false,
+    "autostatusreact": false,
+    "chatbot_status": false,
+    "alwaysonline": false,
+    "autoread": false,
+    "autobio": false,
+    "autotyping": "off",
+    "autorecording": "both",
+    "autoreact": "off"
+  },
+  "120363424013246953@g.us": {
+    "antilink_delete": false,
+    "antilink_warn": false,
+    "antilink_kick": false,
+    "antisticker": false,
+    "antimedia": false,
+    "antibad": false,
+    "antinsfw": false,
+    "antimention": false,
+    "antitag": false,
+    "antitemu": false,
+    "antispam": false,
+    "badwords": [],
+    "users": {},
+    "welcome": false
+  },
+  "120363338762855253@g.us": {
+    "welcome": false,
+    "antilink_delete": false,
+    "antilink_warn": false,
+    "antilink_kick": false,
+    "antisticker": false,
+    "antimedia": false,
+    "antibad": false,
+    "antinsfw": false,
+    "antimention": false,
+    "antitag": false,
+    "antitemu": false,
+    "antispam": false,
+    "badwords": [],
+    "users": {}
+  }
+}
