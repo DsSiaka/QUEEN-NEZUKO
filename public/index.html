@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MCT BOT - Pairing</title>
+    <style>
+        body {
+            background-color: #0d1117;
+            color: #00ff41;
+            font-family: 'Courier New', Courier, monospace;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            flex-direction: column;
+        }
+        .container {
+            background: #161b22;
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 0 20px rgba(0, 255, 65, 0.2);
+            text-align: center;
+            width: 90%;
+            max-width: 400px;
+            border: 1px solid #30363d;
+        }
+        h1 { margin-bottom: 20px; font-size: 24px; text-shadow: 0 0 10px #00ff41; }
+        input {
+            width: 80%;
+            padding: 12px;
+            margin: 10px 0;
+            border-radius: 5px;
+            border: 1px solid #30363d;
+            background: #0d1117;
+            color: white;
+            font-size: 16px;
+            text-align: center;
+        }
+        button {
+            padding: 12px 25px;
+            background: #238636;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            transition: 0.3s;
+        }
+        button:hover { background: #2ea043; box-shadow: 0 0 15px #2ea043; }
+        #code-display {
+            margin-top: 20px;
+            font-size: 32px;
+            letter-spacing: 5px;
+            font-weight: bold;
+            color: #ffffff;
+            background: #21262d;
+            padding: 15px;
+            border-radius: 10px;
+            display: none; /* Caché par défaut */
+            border: 1px dashed #00ff41;
+        }
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #00ff41;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+            display: none;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        p { font-size: 12px; color: #8b949e; margin-top: 15px; }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>🔗 LIER MCT BOT</h1>
+        <div id="input-area">
+            <p>Entrez votre numéro avec le code pays (ex: 223...)</p>
+            <input type="number" id="phoneNumber" placeholder="Ex: 22395256161">
+            <br>
+            <button onclick="getPairingCode()">OBTENIR LE CODE</button>
+        </div>
+
+        <div class="loader" id="loader"></div>
+
+        <div id="code-display"></div>
+        
+        <p id="status-msg">En attente...</p>
+    </div>
+
+    <script>
+        async function getPairingCode() {
+            const phone = document.getElementById('phoneNumber').value.replace(/[^0-9]/g, "");
+            if (!phone) return alert("Entrez un numéro valide !");
+
+            document.getElementById('input-area').style.display = 'none';
+            document.getElementById('loader').style.display = 'block';
+            document.getElementById('status-msg').innerText = "Connexion au serveur WhatsApp...";
+
+            try {
+                // Appel au backend du bot
+                const response = await fetch(`/pair?phone=${phone}`);
+                const data = await response.json();
+
+                document.getElementById('loader').style.display = 'none';
+
+                if (data.code) {
+                    const codeDiv = document.getElementById('code-display');
+                    codeDiv.style.display = 'block';
+                    codeDiv.innerText = data.code;
+                    document.getElementById('status-msg').innerText = "⚠️ Entrez ce code sur votre WhatsApp (Appareils connectés > Lier)";
+                } else {
+                    document.getElementById('input-area').style.display = 'block';
+                    alert("Erreur : " + (data.error || "Impossible d'avoir le code"));
+                }
+            } catch (e) {
+                document.getElementById('loader').style.display = 'none';
+                document.getElementById('input-area').style.display = 'block';
+                alert("Erreur de connexion au bot.");
+            }
+        }
+    </script>
+</body>
+</html>
