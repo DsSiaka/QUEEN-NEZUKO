@@ -171,8 +171,17 @@ async function connectToWhatsApp(pairingNumber = null, res = null) {
 
         if (connection === 'close') {
             const shouldReconnect = lastDisconnect.error?.output?.statusCode !== DisconnectReason.loggedOut;
-            console.log('❌ Connexion fermée. Reconnexion...', shouldReconnect);
-            if (shouldReconnect) connectToWhatsApp();
+            
+            // SI DÉCONNECTÉ (LOGGED OUT) -> ON SUPPRIME LA SESSION POUR EN RECRÉER UNE
+            if (lastDisconnect.error?.output?.statusCode === DisconnectReason.loggedOut) {
+                console.log("⚠️ Session corrompue ou déconnectée. Suppression de auth_info...");
+                fs.rmSync('auth_info', { recursive: true, force: true });
+                connectToWhatsApp(); // On relance à zéro
+            } else {
+                console.log('❌ Connexion fermée. Reconnexion...', shouldReconnect);
+                if (shouldReconnect) connectToWhatsApp();
+            }
+
         } else if (connection === 'open') {
             console.log('✅ Bot Connecté avec succès !');
             if (db.settings.alwaysonline) {
@@ -181,7 +190,6 @@ async function connectToWhatsApp(pairingNumber = null, res = null) {
             }
         }
     });
-
     sock.ev.on('creds.update', saveCreds);
 
     // =========================================================
