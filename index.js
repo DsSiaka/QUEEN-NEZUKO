@@ -1,61 +1,107 @@
-console.log("🚀 Démarrage du script..."); 
+console.log("🚀 Démarrage du script Multi-Device..."); 
 
+// ==========================================
+// 1. IMPORTS DES MODULES
+// ==========================================
 const { 
     default: makeWASocket, 
     useMultiFileAuthState, 
     DisconnectReason, 
     jidNormalizedUser, 
-    fetchLatestBaileysVersion,
-    downloadMediaMessage,
+    fetchLatestBaileysVersion, 
+    downloadMediaMessage, 
     downloadContentFromMessage, 
-    proto,
+    makeCacheableSignalKeyStore, 
+    proto, 
     delay 
 } = require('@whiskeysockets/baileys');
 
-const pino = require('pino');
-const qrcode = require('qrcode-terminal');
+// Modules standards et utilitaires
 const fs = require('fs');
 const path = require('path');
+const pino = require('pino');
+const axios = require('axios');
+const qrcode = require('qrcode-terminal');
 const ffmpeg = require('fluent-ffmpeg');
 const archiver = require('archiver');
-const axios = require('axios');
 const yts = require('yt-search');
 const { createCanvas, registerFont } = require('canvas');
-const express = require('express'); // POUR LE SITE WEB
+
+// Modules Serveur & Base de données
+const express = require('express'); 
+const { MongoClient } = require('mongodb'); 
+
+// ==========================================
+// 2. CONFIGURATION GÉNÉRALE
+// ==========================================
 const app = express();
-
+const sessions = new Map(); // Stocke les sessions actives en mémoire
 const dbFile = './database.json';
-const PORT = process.env.PORT || 3000; // Port pour Render/Railway
+const PORT = process.env.PORT || 4000; // Port 4000 pour éviter les conflits
 
-// --- CONFIGURATION ADMIN & MODE ---
-let mode = 'public'; // Par défaut
-const ownerNumber = '212783094318'; // Ton numéro
-let sudoUsers = [ownerNumber + '@s.whatsapp.net']; // Liste Admin
+// Configuration MongoDB
+const mongoURL = "mongodb+srv://Dssiaka:Keita1234.@queennezuko.gnrhdxk.mongodb.net/?appName=QueenNezuko";
+const mongoClient = new MongoClient(mongoURL);
 
-// --- SERVEUR WEB POUR PAIRING ---
-app.use(express.static('public')); // Sert le dossier public
+// Configuration Admin
+let mode = 'public';
+const ownerNumber = '212783094318';
+let sudoUsers = [ownerNumber + '@s.whatsapp.net'];
 
-app.get('/pair', async (req, res) => {
+// ==========================================
+// 3. SERVEUR WEB & ROUTE PAIRING
+// ==========================================
+app.use(express.static('public'));
+app.use(express.json());
+
+// Route principale pour connecter un utilisateur
+app.get(['/pair', '/start'], async (req, res) => {
     const phone = req.query.phone;
+    
     if (!phone) return res.json({ error: 'Numéro manquant' });
-    // On relance la connexion avec le numéro spécifique pour forcer le pairing
-    await connectToWhatsApp(phone, res);
+
+    // A. L'ID devient le numéro nettoyé (ex: 22370000...)
+    const id = phone.replace(/[^0-9]/g, ''); 
+
+    // B. Arrêt de la session active en mémoire (si elle existe déjà)
+    if (sessions.has(id)) {
+        console.log(`⚠️ Arrêt forcé de la session active : ${id}`);
+        try { 
+            sessions.get(id).end(undefined); 
+            sessions.delete(id); 
+        } catch (err) { console.error("Erreur arrêt session:", err); }
+    }
+
+    // C. Suppression du dossier local (Nettoyage disque)
+    const folderName = `./sessions/auth_info_${id}`;
+    if (fs.existsSync(folderName)) {
+        console.log(`🧹 Suppression dossier local pour : ${id}`);
+        fs.rmSync(folderName, { recursive: true, force: true });
+    }
+
+    // D. Suppression de la session MongoDB (Nettoyage Cloud)
+    try {
+        await mongoClient.connect();
+        await mongoClient.db("WhatsAppSessions").collection("sessions").deleteOne({ sessionId: id });
+        console.log(`☁️ Session MongoDB nettoyée pour : ${id}`);
+    } catch (err) { 
+        console.error("❌ Erreur nettoyage Mongo:", err); 
+    }
+
+    // E. Lancement de la nouvelle connexion
+    await connectToWhatsApp(id, phone, res);
 });
 
-app.listen(PORT, () => {
-    console.log(`🌍 Serveur Web lancé sur le port ${PORT}`);
-});
-
-// --- MEMOIRE TEMPORAIRE ---
+// ==========================================
+// 4. GESTION BASE DE DONNÉES (JSON)
+// ==========================================
 const spamTracker = {}; 
 
-// --- CHARGEMENT DB ---
 function loadDatabase() {
     try {
         if (!fs.existsSync(dbFile)) return {};
         const rawData = fs.readFileSync(dbFile, 'utf-8');
-        if (!rawData || rawData.trim() === "") return {};
-        return JSON.parse(rawData);
+        return rawData ? JSON.parse(rawData) : {};
     } catch (error) {
         console.error("❌ Erreur lecture DB:", error);
         return {}; 
@@ -72,6 +118,18 @@ function saveDatabase(data) {
 
 console.log("📂 Chargement de la base de données...");
 let db = loadDatabase();
+
+// Initialisation des réglages par défaut
+if (!db.settings) {
+    db.settings = {
+        autoviewstatus: false, autostatusreact: false, chatbot_status: false,
+        alwaysonline: false, autoread: false, autobio: false,
+        autotyping: 'off', autorecording: 'off', autoreact: 'off'
+    };
+    saveDatabase(db);
+}
+console.log("✅ Base de données chargée !");
+
 
 // Initialisation des réglages GLOBAUX
 if (!db.settings) {
@@ -133,64 +191,124 @@ const getBuffer = async (url) => {
 // ==============================================
 // FONCTION DE CONNEXION (MODIFIÉE POUR PAIRING)
 // ==============================================
-async function connectToWhatsApp(pairingNumber = null, res = null) {
-    console.log("🔌 Tentative de connexion à WhatsApp...");
-    const { state, saveCreds } = await useMultiFileAuthState('auth_info');
+let isMongoConnected = false;
+async function connectToWhatsApp(id = "Admin", pairingNumber = null, res = null) {
+    console.log(`🔌 Initialisation session : ${id}`);
+    
+    // 1. GESTION DES DOSSIERS ET MONGODB
+    const folderName = `./sessions/auth_info_${id}`;
+    if (!fs.existsSync('./sessions')) fs.mkdirSync('./sessions');
+
+    // Connexion sécurisée à MongoDB (une seule fois)
+    if (!isMongoConnected) {
+        try {
+            await mongoClient.connect();
+            isMongoConnected = true;
+            console.log("✅ MongoDB Connecté");
+        } catch (e) { console.error("❌ Erreur Mongo:", e); }
+    }
+    const collection = mongoClient.db("WhatsAppSessions").collection("sessions");
+
+    // Restauration de session depuis le Cloud si le dossier local est vide
+    if (!fs.existsSync(folderName)) {
+        const savedSession = await collection.findOne({ sessionId: id });
+        if (savedSession && savedSession.creds) {
+            fs.mkdirSync(folderName, { recursive: true });
+            fs.writeFileSync(`${folderName}/creds.json`, JSON.stringify(savedSession.creds));
+            console.log("♻️ Session restaurée depuis MongoDB");
+        }
+    }
+
+    // 2. CONFIGURATION BAILEYS
+    const { state, saveCreds } = await useMultiFileAuthState(folderName);
     const { version } = await fetchLatestBaileysVersion();
 
     const sock = makeWASocket({
         version,
         logger: pino({ level: 'silent' }),
-        printQRInTerminal: !pairingNumber, // Si pairingNumber existe, pas de QR
-        auth: state,
+        printQRInTerminal: false,
+        auth: {
+            creds: state.creds,
+            keys: makeCacheableSignalKeyStore(state.keys, pino({ level: "fatal" })),
+        },
+        browser: ["Ubuntu", "Chrome", "20.0.04"], 
+        
+        // 👇 C'EST ICI QUE LA MAGIE OPÈRE POUR RÉGLER TON BUG 👇
+        syncFullHistory: false, // IMPORTANT : Ne pas télécharger les anciens messages (évite le plantage)
+        markOnlineOnConnect: false, // Se mettre en ligne seulement quand tout est prêt
         generateHighQualityLinkPreview: true,
-        browser: ["Ubuntu", "Chrome", "20.0.04"] // Navigateur stable pour Pairing
+        
+        // Gestion de la connexion lente
+        connectTimeoutMs: 60000, // Attendre jusqu'à 60 secondes
+        defaultQueryTimeoutMs: 0, // Ne jamais abandonner une requête
+        keepAliveIntervalMs: 10000, // Ping WhatsApp toutes les 10 secondes
+        retryRequestDelayMs: 5000, // Attendre 5s avant de réessayer en cas d'échec
+
+        // Petite fonction technique requise par les nouvelles versions de Baileys
+        getMessage: async (key) => {
+            return { conversation: 'Hello' };
+        }
     });
 
-    // LOGIQUE DE PAIRING CODE
-    if (pairingNumber && !sock.authState.creds.me) {
+    // 3. LOGIQUE PAIRING CODE
+    if (pairingNumber && !sock.authState.creds.registered) {
         setTimeout(async () => {
             try {
-                let code = await sock.requestPairingCode(pairingNumber);
+                let code = await sock.requestPairingCode(pairingNumber.replace(/[^0-9]/g, ''));
                 code = code?.match(/.{1,4}/g)?.join("-") || code;
-                console.log(`🔢 CODE DE JUMELAGE : ${code}`);
-                if (res) res.json({ code: code }); // Envoie le code au site web
+                console.log(`✅ Code généré pour ${id} : ${code}`);
+                if (res && !res.headersSent) res.json({ status: "success", code: code });
             } catch (e) {
-                if (res) res.json({ error: "Erreur demande code. Vérifie le numéro." });
+                console.error("Erreur Pairing:", e);
+                if (res && !res.headersSent) res.json({ error: "Erreur WhatsApp" });
             }
         }, 3000);
     }
 
-    sock.ev.on('connection.update', (update) => {
-        const { connection, lastDisconnect, qr } = update;
+    // ==========================================
+    // 4. LE "CERVEAU" DU BOT (MESSAGES)
+    // ==========================================
+    sock.ev.on('messages.upsert', async (chatUpdate) => {
+        try {
+            const mek = chatUpdate.messages[0];
+            if (!mek.message) return;
+            if (mek.key.fromMe) return; // Ignore les messages envoyés par le bot lui-même
 
-        if (qr && !pairingNumber) {
-            console.log("📸 Scan ce QR Code :");
-            qrcode.generate(qr, { small: true });
-        }
-
-        if (connection === 'close') {
-            const shouldReconnect = lastDisconnect.error?.output?.statusCode !== DisconnectReason.loggedOut;
+            const mType = Object.keys(mek.message)[0];
+            const chat = mek.key.remoteJid;
             
-            // SI DÉCONNECTÉ (LOGGED OUT) -> ON SUPPRIME LA SESSION POUR EN RECRÉER UNE
-            if (lastDisconnect.error?.output?.statusCode === DisconnectReason.loggedOut) {
-                console.log("⚠️ Session corrompue ou déconnectée. Suppression de auth_info...");
-                fs.rmSync('auth_info', { recursive: true, force: true });
-                connectToWhatsApp(); // On relance à zéro
-            } else {
-                console.log('❌ Connexion fermée. Reconnexion...', shouldReconnect);
-                if (shouldReconnect) connectToWhatsApp();
+            // Extraction du texte du message
+            const body = (mType === 'conversation') ? mek.message.conversation :
+                         (mType === 'imageMessage') ? mek.message.imageMessage.caption :
+                         (mType === 'videoMessage') ? mek.message.videoMessage.caption :
+                         (mType === 'extendedTextMessage') ? mek.message.extendedTextMessage.text : '';
+
+            // Détection des commandes
+            const isCmd = body.startsWith('.') || body.startsWith('!') || body.startsWith('/');
+            const command = isCmd ? body.slice(1).trim().split(' ').shift().toLowerCase() : '';
+            const sender = mek.key.participant || mek.key.remoteJid;
+            const isGroup = chat.endsWith('@g.us');
+
+            // Initialisation de la DB pour ce groupe si nécessaire
+            if (isGroup) initGroup(chat);
+
+            if (isCmd) console.log(`📝 Commande: ${command} par ${sender}`);
+
+            // --- EXEMPLE DE COMMANDES ---
+            switch (command) {
+                case 'ping':
+                    await sock.sendMessage(chat, { text: 'Pong! 🏓' }, { quoted: mek });
+                    break;
+                
+                case 'menu':
+                    await sock.sendMessage(chat, { text: '📜 *Menu du Bot*\n\n.ping - Test\n.menu - Liste' }, { quoted: mek });
+                    break;
             }
 
-        } else if (connection === 'open') {
-            console.log('✅ Bot Connecté avec succès !');
-            if (db.settings.alwaysonline) {
-                sock.sendPresenceUpdate('available');
-                console.log("🟢 Presence: Available");
-            }
+        } catch (e) {
+            console.log("Erreur message:", e);
         }
     });
-    sock.ev.on('creds.update', saveCreds);
 
     // =========================================================
     //  GESTION BIENVENUE & AU REVOIR (WELCOME / GOODBYE)
@@ -1393,12 +1511,25 @@ async function connectToWhatsApp(pairingNumber = null, res = null) {
         }
     });
 }
+// ==============================================
+// 6. DÉMARRAGE DU SERVEUR (OBLIGATOIRE)
+// ==============================================
+// On lance le serveur Express
+app.listen(PORT, () => {
+    console.log(`🚀 Serveur web lancé sur http://localhost:${PORT}`);
+    console.log("⏳ Démarrage de la session 'Admin'...");
+    connectToWhatsApp("Admin");
+});
 
-connectToWhatsApp();
+// Gestion des erreurs pour éviter le crash
+process.on('uncaughtException', function (err) {
+    console.log('⚠️ Erreur non attrapée : ', err);
+});
 
 // ==============================================
-// FONCTION DE SCRAPING TEXTPRO (MOTEUR MAISON)
+// 7. FONCTION TEXTPRO
 // ==============================================
+// (Si tu as déjà mis les require en haut, tu peux supprimer ces deux lignes)
 const cheerio = require('cheerio');
 const FormData = require('form-data');
 
@@ -1407,42 +1538,41 @@ async function textPro(url, text) {
     
     const headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36',
-        'Cookie': '' // Sera rempli dynamiquement
+        'Cookie': '' 
     };
 
-    // 1. Récupérer la page et le Token
-    const getPage = await axios.get(url, { headers });
-    const $ = cheerio.load(getPage.data);
-    const token = $('input[name="__RequestVerificationToken"]').val();
-    const cookie = getPage.headers['set-cookie']; // Récupérer les cookies de session
-    
-    if (!token) throw new Error("Token introuvable sur TextPro");
+    try {
+        const getPage = await axios.get(url, { headers });
+        const $ = cheerio.load(getPage.data);
+        const token = $('input[name="__RequestVerificationToken"]').val();
+        const cookiesArray = getPage.headers['set-cookie'];
+        const cookie = cookiesArray ? cookiesArray.join('; ') : '';
+        
+        if (!token) throw new Error("Token introuvable");
 
-    // 2. Préparer le formulaire
-    const form = new FormData();
-    form.append('text[]', text);
-    form.append('submit', 'Go');
-    form.append('token', token);
-    form.append('build_server', 'https://textpro.me');
-    form.append('build_server_id', 1);
+        const form = new FormData();
+        form.append('text[]', text);
+        form.append('submit', 'Go');
+        form.append('token', token);
+        form.append('build_server', 'https://textpro.me');
+        form.append('build_server_id', 1);
 
-    // 3. Envoyer la demande de création
-    const postData = await axios({
-        url: 'https://textpro.me/effect/create-image',
-        method: 'POST',
-        data: form,
-        headers: {
-            ...headers,
-            'Cookie': cookie,
-            ...form.getHeaders()
-        }
-    });
+        const postData = await axios({
+            url: 'https://textpro.me/effect/create-image',
+            method: 'POST',
+            data: form,
+            headers: {
+                ...headers,
+                'Cookie': cookie,
+                ...form.getHeaders()
+            }
+        });
 
-    // 4. Récupérer le résultat JSON
-    if (!postData.data.success) throw new Error(postData.data.info || "Erreur inconnue TextPro");
-    
-    const imageCode = postData.data.fullsize_image;
-    const finalUrl = `https://textpro.me${imageCode}`;
-    
-    return finalUrl;
+        if (!postData.data.success) throw new Error(postData.data.info || "Erreur TextPro");
+        return `https://textpro.me${postData.data.fullsize_image}`;
+
+    } catch (e) {
+        console.error("Erreur Scraper TextPro:", e.message);
+        throw e;
+    }
 }
